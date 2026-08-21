@@ -1,0 +1,453 @@
+//@version=6
+indicator("Hourly Distro [Desiringmachine]", overlay = true, dynamic_requests = true, max_lines_count = 200, max_labels_count = 200, max_boxes_count = 100)
+
+// Statistical price-distribution map. Samples are completed windows only: no current
+// daily, session, or hourly observation is included in either historical distribution.
+
+// === Inputs ===
+string GROUP_SAMPLE = "Distribution Samples"
+string GROUP_WINDOW = "Active Windows"
+string GROUP_DISPLAY = "Distribution Display"
+string GROUP_5Y = "Base - Sx (5Y Bars)"
+string GROUP_20D = "Roll - Dx (20D Bars)"
+string GROUP_LABELS = "Label and Border Style"
+
+show5YHour = input.bool(true, "H", inline = "5y", group = GROUP_5Y, display = display.none)
+show5YSession = input.bool(true, "S", inline = "5y", group = GROUP_5Y, display = display.none)
+show5YDaily = input.bool(true, "D", inline = "5y", group = GROUP_5Y, display = display.none)
+show5YWeekly = input.bool(false, "W", inline = "5y", group = GROUP_5Y, display = display.none)
+show5YMonthly = input.bool(false, "M", inline = "5y", group = GROUP_5Y, display = display.none)
+show5YYearly = input.bool(false, "Y", inline = "5y", group = GROUP_5Y, display = display.none)
+fiveYearOffset = input.int(-160, "Sx Offs", minval = -500, maxval = 500,inline = "5y",  group = GROUP_5Y, display = display.none)
+
+show20DHour = input.bool(true, "H", inline = "20d", group = GROUP_20D, display = display.none)
+show20DSession = input.bool(true, "S", inline = "20d", group = GROUP_20D, display = display.none)
+show20DDaily = input.bool(true, "D", inline = "20d", group = GROUP_20D, display = display.none)
+show20DWeekly = input.bool(false, "W", inline = "20d", group = GROUP_20D, display = display.none)
+show20DMonthly = input.bool(false, "M", inline = "20d", group = GROUP_20D, display = display.none)
+show20DYearly = input.bool(false, "Y", inline = "20d", group = GROUP_20D, display = display.none)
+twentyDayOffset = input.int(20, "Dx Offs", minval = -500, maxval = 500, inline = "20d",group = GROUP_20D, display = display.none)
+
+sessionMode = input.string("Auto (Current Session)", "Session", options = ["Auto (Current Session)", "Asia", "London", "NY AM", "NY PM"],inline="1", group = GROUP_WINDOW, display = display.none)
+hourMode = input.string("Auto (Current Hour)", "Hour", options = ["Auto (Current Hour)", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"],inline="1", group = GROUP_WINDOW, display = display.none)
+
+regimerange="Regime Range Lines and bar settings"
+showHourRegimeLines = input.bool(false, "H", group = regimerange,inline="1", display = display.none)
+showSessionRegimeLines = input.bool(false, "S", group = regimerange,inline="1", display = display.none)
+showDailyRegimeLines = input.bool(false, "D", group = regimerange, inline="1", display = display.none)
+showWeeklyRegimeLines = input.bool(false, "W", group = regimerange, inline="1", display = display.none)
+showMonthlyRegimeLines = input.bool(false, "M", group = regimerange, inline="1", display = display.none)
+showYearlyRegimeLines = input.bool(false, "Y", group = regimerange, inline="1", display = display.none)
+showRegime = input.bool(false, "Regime Status",inline="2", group = regimerange, display = display.none)
+
+showSampleCount = input.bool(false, "Sample N", group = regimerange,inline="2", display = display.none)
+showSD = input.bool(true, "+-SD",inline="2", group = regimerange, display = display.none)
+showLabels = input.bool(true, "Lbl",inline="2", group = regimerange, display = display.none)
+
+//display
+columnWidth = input.int(5, "Column width", minval = 1, maxval = 20,inline="1", group = GROUP_DISPLAY, display = display.none)
+columnGap = input.int(12, "Column gap", minval = 2, maxval = 50,inline="1", group = GROUP_DISPLAY, display = display.none)
+dataTextSizeInput = input.string("Small", "Txt size", options = ["Tiny", "Small", "Normal", "Large"],inline="3", group = GROUP_DISPLAY, display = display.none)
+borderStyleInput = input.string("Dotted", "Border", options = ["Solid", "Dashed", "Dotted"],inline="3", group = GROUP_DISPLAY, display = display.none)
+longColor = input.color(color.white, "5Y SD", group = GROUP_DISPLAY,inline="4", display = display.none)
+shortColor = input.color(color.white, "20D SD", group = GROUP_DISPLAY,inline="4", display = display.none)
+upColor = input.color(color.rgb(20, 132, 59), "Up color", group = GROUP_DISPLAY,inline="5", display = display.none)
+downColor = input.color(color.rgb(167, 34, 34), "Down color", group = GROUP_DISPLAY,inline="5", display = display.none)
+nameTextColor = input.color(color.yellow, "Name bar",inline="6", group = GROUP_DISPLAY, display = display.none)
+brdrclr = input.color (color.new(color.white, 25), "Border Bar", inline ="6",group = GROUP_DISPLAY, display = display.none)
+longColor2 =input.color(color.white, "p Up", group = GROUP_DISPLAY,inline="7", display = display.none)
+shortColor2 = input.color(color.white, "P Dw", group = GROUP_DISPLAY,inline="7", display = display.none)
+regimeLineColor = input.color(color.new(color.silver, 35), "Regime Line",inline="8", group = GROUP_DISPLAY, display = display.none)
+
+longYears = input.float(5.0, "Base - Sx (Yrs)", minval = 0.5, step = 0.5, inline="1", group = GROUP_SAMPLE, display = display.none)
+shortLength = input.int(20, "Roll - Dx (Days)", minval = 5, maxval = 100,inline="1", group = GROUP_SAMPLE, display = display.none)
+minSamples = input.int(30, "Min samples", minval = 10, group = GROUP_SAMPLE,inline="1", display = display.none)
+
+string GROUP_YEARLY = "Yearly Window Settings"
+yearLongYears = input.float(30.0, "Base - Y (Yrs)", minval = 1.0, step = 1.0, inline="1", group = GROUP_YEARLY, display = display.none)
+yearShortLength = input.int(5, "Roll - Y (Bars)", minval = 2, maxval = 100, inline="1", group = GROUP_YEARLY, display = display.none)
+yearMinSamples = input.int(3, "Min samples (Y)", minval = 2, group = GROUP_YEARLY, inline="1", display = display.none)
+
+// === Shared utilities ===
+const string NY_TZ = "America/New_York"
+longLookbackMs = longYears * 365.25 * 24.0 * 60.0 * 60.0 * 1000.0
+yearLongLookbackMs = yearLongYears * 365.25 * 24.0 * 60.0 * 60.0 * 1000.0
+var array<float> sdMultipliers = array.from(0.5, 1.0, 1.5, 2.0)
+
+f_text_size(string sizeInput) =>
+    sizeInput == "Small" ? size.small : sizeInput == "Normal" ? size.normal : sizeInput == "Large" ? size.large : size.tiny
+
+f_border_style(string styleInput) =>
+    styleInput == "Dashed" ? line.style_dashed : styleInput == "Dotted" ? line.style_dotted : line.style_solid
+
+f_push_sample(array<float> longClose, array<float> longHigh, array<float> longLow, array<int> longTimes, array<float> shortClose, array<float> shortHigh, array<float> shortLow, float closeRet, float highRet, float lowRet, int sampleTime, float lookbackMs, int shortN) =>
+    array.push(longClose, closeRet)
+    array.push(longHigh, highRet)
+    array.push(longLow, lowRet)
+    array.push(longTimes, sampleTime)
+    while array.size(longTimes) > 0 and sampleTime - array.get(longTimes, 0) > lookbackMs
+        array.shift(longClose)
+        array.shift(longHigh)
+        array.shift(longLow)
+        array.shift(longTimes)
+    array.push(shortClose, closeRet)
+    array.push(shortHigh, highRet)
+    array.push(shortLow, lowRet)
+    if array.size(shortClose) > shortN
+        array.shift(shortClose)
+        array.shift(shortHigh)
+        array.shift(shortLow)
+
+// Runs inside the requested daily context, so it adds exactly one completed daily bar.
+f_collect_daily_source(float lookbackMs, int shortN) =>
+    var array<float> longClose = array.new<float>()
+    var array<float> longHigh = array.new<float>()
+    var array<float> longLow = array.new<float>()
+    var array<int> longTimes = array.new<int>()
+    var array<float> shortClose = array.new<float>()
+    var array<float> shortHigh = array.new<float>()
+    var array<float> shortLow = array.new<float>()
+    if barstate.isnew and not na(open[1]) and open[1] != 0
+        f_push_sample(longClose, longHigh, longLow, longTimes, shortClose, shortHigh, shortLow, (close[1] - open[1]) / open[1], (high[1] - open[1]) / open[1], (low[1] - open[1]) / open[1], time[1], lookbackMs, shortN)
+    [array.size(longClose) > 1 ? array.stdev(longClose, true) : na, array.size(shortClose) > 1 ? array.stdev(shortClose, true) : na, array.size(longClose), array.size(shortClose)]
+
+// Runs inside the requested 60-minute context. Each call site owns one session/hour state.
+f_collect_window_source(int startHour, int endHour, float lookbackMs, int shortN) =>
+    var float windowOpen = na
+    var float windowHigh = na
+    var float windowLow = na
+    var float windowClose = na
+    var bool wasInside = false
+    var array<float> longClose = array.new<float>()
+    var array<float> longHigh = array.new<float>()
+    var array<float> longLow = array.new<float>()
+    var array<int> longTimes = array.new<int>()
+    var array<float> shortClose = array.new<float>()
+    var array<float> shortHigh = array.new<float>()
+    var array<float> shortLow = array.new<float>()
+    int hourNow = hour(time, NY_TZ)
+    bool wraps = startHour > endHour
+    bool inside = wraps ? (hourNow >= startHour or hourNow <= endHour) : (hourNow >= startHour and hourNow <= endHour)
+    if inside and not wasInside and barstate.isnew
+        windowOpen := open
+        windowHigh := high
+        windowLow := low
+        windowClose := close
+    else if inside and wasInside
+        // Keep the active 60-minute candle current on realtime ticks.
+        windowHigh := math.max(windowHigh, high)
+        windowLow := math.min(windowLow, low)
+        windowClose := close
+    if barstate.isnew
+        if wasInside and not inside and not na(windowOpen) and windowOpen != 0
+            f_push_sample(longClose, longHigh, longLow, longTimes, shortClose, shortHigh, shortLow, (windowClose - windowOpen) / windowOpen, (windowHigh - windowOpen) / windowOpen, (windowLow - windowOpen) / windowOpen, time[1], lookbackMs, shortN)
+        wasInside := inside
+    float activeOpen = inside ? windowOpen : na
+    float activeHigh = inside ? windowHigh : na
+    float activeLow = inside ? windowLow : na
+    [array.size(longClose) > 1 ? array.stdev(longClose, true) : na, array.size(shortClose) > 1 ? array.stdev(shortClose, true) : na, array.size(longClose), array.size(shortClose), activeOpen, activeHigh, activeLow, inside]
+
+f_regime(float shortSD, int shortN, float longSD, int longN, int minSamp, int shortLen) =>
+    float ratio = not na(shortSD) and not na(longSD) and longSD != 0 ? shortSD / longSD : na
+    string name = shortN < shortLen or longN < minSamp or na(ratio) ? "warming" : ratio < 0.95 ? "compression" : ratio > 1.05 ? "expansion" : "normal"
+    [ratio, name]
+
+// ============ SESSION CONSOLIDATION WRAPPER ============
+f_allSessions_HD(lookbackMs, shortN) =>
+    [aLSD, aSSD, aLN, aSN, aO, aH, aL, aA] = f_collect_window_source(20, 1, lookbackMs, shortN)
+    [lLSD, lSSD, lLN, lSN, lO, lH, lL, lA] = f_collect_window_source(2, 7, lookbackMs, shortN)
+    [nyamLSD, nyamSSD, nyamLN, nyamSN, nyamO, nyamH, nyamL, nyamA] = f_collect_window_source(8, 11, lookbackMs, shortN)
+    [nypmLSD, nypmSSD, nypmLN, nypmSN, nypmO, nypmH, nypmL, nypmA] = f_collect_window_source(12, 15, lookbackMs, shortN)
+    [aLSD, aSSD, aLN, aSN, aO, aH, aL, aA, lLSD, lSSD, lLN, lSN, lO, lH, lL, lA, nyamLSD, nyamSSD, nyamLN, nyamSN, nyamO, nyamH, nyamL, nyamA, nypmLSD, nypmSSD, nypmLN, nypmSN, nypmO, nypmH, nypmL, nypmA]
+
+// ============ HOUR CONSOLIDATION WRAPPER ============
+f_allHours_HD(lookbackMs, shortN) =>
+    [h00LSD, h00SSD, h00LN, h00SN, h00O, h00Hi, h00Lo, h00A] = f_collect_window_source(0, 0, lookbackMs, shortN)
+    [h01LSD, h01SSD, h01LN, h01SN, h01O, h01Hi, h01Lo, h01A] = f_collect_window_source(1, 1, lookbackMs, shortN)
+    [h02LSD, h02SSD, h02LN, h02SN, h02O, h02Hi, h02Lo, h02A] = f_collect_window_source(2, 2, lookbackMs, shortN)
+    [h03LSD, h03SSD, h03LN, h03SN, h03O, h03Hi, h03Lo, h03A] = f_collect_window_source(3, 3, lookbackMs, shortN)
+    [h04LSD, h04SSD, h04LN, h04SN, h04O, h04Hi, h04Lo, h04A] = f_collect_window_source(4, 4, lookbackMs, shortN)
+    [h05LSD, h05SSD, h05LN, h05SN, h05O, h05Hi, h05Lo, h05A] = f_collect_window_source(5, 5, lookbackMs, shortN)
+    [h06LSD, h06SSD, h06LN, h06SN, h06O, h06Hi, h06Lo, h06A] = f_collect_window_source(6, 6, lookbackMs, shortN)
+    [h07LSD, h07SSD, h07LN, h07SN, h07O, h07Hi, h07Lo, h07A] = f_collect_window_source(7, 7, lookbackMs, shortN)
+    [h08LSD, h08SSD, h08LN, h08SN, h08O, h08Hi, h08Lo, h08A] = f_collect_window_source(8, 8, lookbackMs, shortN)
+    [h09LSD, h09SSD, h09LN, h09SN, h09O, h09Hi, h09Lo, h09A] = f_collect_window_source(9, 9, lookbackMs, shortN)
+    [h10LSD, h10SSD, h10LN, h10SN, h10O, h10Hi, h10Lo, h10A] = f_collect_window_source(10, 10, lookbackMs, shortN)
+    [h11LSD, h11SSD, h11LN, h11SN, h11O, h11Hi, h11Lo, h11A] = f_collect_window_source(11, 11, lookbackMs, shortN)
+    [h12LSD, h12SSD, h12LN, h12SN, h12O, h12Hi, h12Lo, h12A] = f_collect_window_source(12, 12, lookbackMs, shortN)
+    [h13LSD, h13SSD, h13LN, h13SN, h13O, h13Hi, h13Lo, h13A] = f_collect_window_source(13, 13, lookbackMs, shortN)
+    [h14LSD, h14SSD, h14LN, h14SN, h14O, h14Hi, h14Lo, h14A] = f_collect_window_source(14, 14, lookbackMs, shortN)
+    [h15LSD, h15SSD, h15LN, h15SN, h15O, h15Hi, h15Lo, h15A] = f_collect_window_source(15, 15, lookbackMs, shortN)
+    [h16LSD, h16SSD, h16LN, h16SN, h16O, h16Hi, h16Lo, h16A] = f_collect_window_source(16, 16, lookbackMs, shortN)
+    [h17LSD, h17SSD, h17LN, h17SN, h17O, h17Hi, h17Lo, h17A] = f_collect_window_source(17, 17, lookbackMs, shortN)
+    [h18LSD, h18SSD, h18LN, h18SN, h18O, h18Hi, h18Lo, h18A] = f_collect_window_source(18, 18, lookbackMs, shortN)
+    [h19LSD, h19SSD, h19LN, h19SN, h19O, h19Hi, h19Lo, h19A] = f_collect_window_source(19, 19, lookbackMs, shortN)
+    [h20LSD, h20SSD, h20LN, h20SN, h20O, h20Hi, h20Lo, h20A] = f_collect_window_source(20, 20, lookbackMs, shortN)
+    [h21LSD, h21SSD, h21LN, h21SN, h21O, h21Hi, h21Lo, h21A] = f_collect_window_source(21, 21, lookbackMs, shortN)
+    [h22LSD, h22SSD, h22LN, h22SN, h22O, h22Hi, h22Lo, h22A] = f_collect_window_source(22, 22, lookbackMs, shortN)
+    [h23LSD, h23SSD, h23LN, h23SN, h23O, h23Hi, h23Lo, h23A] = f_collect_window_source(23, 23, lookbackMs, shortN)
+    [h00LSD, h00SSD, h00LN, h00SN, h00O, h00Hi, h00Lo, h00A, h01LSD, h01SSD, h01LN, h01SN, h01O, h01Hi, h01Lo, h01A, h02LSD, h02SSD, h02LN, h02SN, h02O, h02Hi, h02Lo, h02A, h03LSD, h03SSD, h03LN, h03SN, h03O, h03Hi, h03Lo, h03A, h04LSD, h04SSD, h04LN, h04SN, h04O, h04Hi, h04Lo, h04A, h05LSD, h05SSD, h05LN, h05SN, h05O, h05Hi, h05Lo, h05A, h06LSD, h06SSD, h06LN, h06SN, h06O, h06Hi, h06Lo, h06A, h07LSD, h07SSD, h07LN, h07SN, h07O, h07Hi, h07Lo, h07A, h08LSD, h08SSD, h08LN, h08SN, h08O, h08Hi, h08Lo, h08A, h09LSD, h09SSD, h09LN, h09SN, h09O, h09Hi, h09Lo, h09A, h10LSD, h10SSD, h10LN, h10SN, h10O, h10Hi, h10Lo, h10A, h11LSD, h11SSD, h11LN, h11SN, h11O, h11Hi, h11Lo, h11A, h12LSD, h12SSD, h12LN, h12SN, h12O, h12Hi, h12Lo, h12A, h13LSD, h13SSD, h13LN, h13SN, h13O, h13Hi, h13Lo, h13A, h14LSD, h14SSD, h14LN, h14SN, h14O, h14Hi, h14Lo, h14A, h15LSD, h15SSD, h15LN, h15SN, h15O, h15Hi, h15Lo, h15A, h16LSD, h16SSD, h16LN, h16SN, h16O, h16Hi, h16Lo, h16A, h17LSD, h17SSD, h17LN, h17SN, h17O, h17Hi, h17Lo, h17A, h18LSD, h18SSD, h18LN, h18SN, h18O, h18Hi, h18Lo, h18A, h19LSD, h19SSD, h19LN, h19SN, h19O, h19Hi, h19Lo, h19A, h20LSD, h20SSD, h20LN, h20SN, h20O, h20Hi, h20Lo, h20A, h21LSD, h21SSD, h21LN, h21SN, h21O, h21Hi, h21Lo, h21A, h22LSD, h22SSD, h22LN, h22SN, h22O, h22Hi, h22Lo, h22A, h23LSD, h23SSD, h23LN, h23SN, h23O, h23Hi, h23Lo, h23A]
+
+// === Daily, Weekly, Monthly, Yearly and hourly source data ===
+[monthlyOpen, monthlyHigh, monthlyLow, prevMonthlyOpen, prevMonthlyHigh, prevMonthlyLow, prevMonthlyClose, prevMonthlyTime] = request.security(syminfo.tickerid, "M", [open, high, low, open[1], high[1], low[1], close[1], time[1]], lookahead = barmerge.lookahead_on)
+[weeklyOpen, weeklyHigh, weeklyLow, prevWeeklyOpen, prevWeeklyHigh, prevWeeklyLow, prevWeeklyClose, prevWeeklyTime] = request.security(syminfo.tickerid, "W", [open, high, low, open[1], high[1], low[1], close[1], time[1]], lookahead = barmerge.lookahead_on)
+[dailyOpen, dailyHigh, dailyLow, prevDailyOpen, prevDailyHigh, prevDailyLow, prevDailyClose, prevDailyTime] = request.security(syminfo.tickerid, "D", [open, high, low, open[1], high[1], low[1], close[1], time[1]], lookahead = barmerge.lookahead_on)
+[yearlyOpen, yearlyHigh, yearlyLow] = request.security(syminfo.tickerid, "12M", [open, high, low], lookahead = barmerge.lookahead_on)
+newDay = ta.change(time("D")) != 0
+// Live window clocks use the chart bar itself, avoiding requested-timeframe resets.
+currentHour = hour(time, NY_TZ)
+
+// === Distribution engines ===
+[mLongSD, mShortSD, mLongN, mShortN] = request.security(syminfo.tickerid, "M", f_collect_daily_source(longLookbackMs, shortLength), lookahead = barmerge.lookahead_on)
+[wLongSD, wShortSD, wLongN, wShortN] = request.security(syminfo.tickerid, "W", f_collect_daily_source(longLookbackMs, shortLength), lookahead = barmerge.lookahead_on)
+[dLongSD, dShortSD, dLongN, dShortN] = request.security(syminfo.tickerid, "D", f_collect_daily_source(longLookbackMs, shortLength), lookahead = barmerge.lookahead_on)
+[yLongSD, yShortSD, yLongN, yShortN] = request.security(syminfo.tickerid, "12M", f_collect_daily_source(yearLongLookbackMs, yearShortLength), lookahead = barmerge.lookahead_on)
+
+[asiaLongSD, asiaShortSD, asiaLongN, asiaShortN, asiaOpen, asiaHigh, asiaLow, asiaActive, londonLongSD, londonShortSD, londonLongN, londonShortN, londonOpen, londonHigh, londonLow, londonActive, nyamLongSD, nyamShortSD, nyamLongN, nyamShortN, nyamOpen, nyamHigh, nyamLow, nyamActive, nypmLongSD, nypmShortSD, nypmLongN, nypmShortN, nypmOpen, nypmHigh, nypmLow, nypmActive] = request.security(syminfo.tickerid, "60", f_allSessions_HD(longLookbackMs, shortLength), lookahead = barmerge.lookahead_on)
+
+// One tracker per New York hour keeps each hourly distribution time-of-day specific.
+[h00LSD, h00SSD, h00LN, h00SN, h00O, h00Hi, h00Lo, h00A, h01LSD, h01SSD, h01LN, h01SN, h01O, h01Hi, h01Lo, h01A, h02LSD, h02SSD, h02LN, h02SN, h02O, h02Hi, h02Lo, h02A, h03LSD, h03SSD, h03LN, h03SN, h03O, h03Hi, h03Lo, h03A, h04LSD, h04SSD, h04LN, h04SN, h04O, h04Hi, h04Lo, h04A, h05LSD, h05SSD, h05LN, h05SN, h05O, h05Hi, h05Lo, h05A, h06LSD, h06SSD, h06LN, h06SN, h06O, h06Hi, h06Lo, h06A, h07LSD, h07SSD, h07LN, h07SN, h07O, h07Hi, h07Lo, h07A, h08LSD, h08SSD, h08LN, h08SN, h08O, h08Hi, h08Lo, h08A, h09LSD, h09SSD, h09LN, h09SN, h09O, h09Hi, h09Lo, h09A, h10LSD, h10SSD, h10LN, h10SN, h10O, h10Hi, h10Lo, h10A, h11LSD, h11SSD, h11LN, h11SN, h11O, h11Hi, h11Lo, h11A, h12LSD, h12SSD, h12LN, h12SN, h12O, h12Hi, h12Lo, h12A, h13LSD, h13SSD, h13LN, h13SN, h13O, h13Hi, h13Lo, h13A, h14LSD, h14SSD, h14LN, h14SN, h14O, h14Hi, h14Lo, h14A, h15LSD, h15SSD, h15LN, h15SN, h15O, h15Hi, h15Lo, h15A, h16LSD, h16SSD, h16LN, h16SN, h16O, h16Hi, h16Lo, h16A, h17LSD, h17SSD, h17LN, h17SN, h17O, h17Hi, h17Lo, h17A, h18LSD, h18SSD, h18LN, h18SN, h18O, h18Hi, h18Lo, h18A, h19LSD, h19SSD, h19LN, h19SN, h19O, h19Hi, h19Lo, h19A, h20LSD, h20SSD, h20LN, h20SN, h20O, h20Hi, h20Lo, h20A, h21LSD, h21SSD, h21LN, h21SN, h21O, h21Hi, h21Lo, h21A, h22LSD, h22SSD, h22LN, h22SN, h22O, h22Hi, h22Lo, h22A, h23LSD, h23SSD, h23LN, h23SN, h23O, h23Hi, h23Lo, h23A] = request.security(syminfo.tickerid, "60", f_allHours_HD(longLookbackMs, shortLength), lookahead = barmerge.lookahead_on)
+
+// Tracks the active window directly from chart bars. Statistical samples remain source-timeframe based.
+f_track_session_chart(int sessionId, int hourNow) =>
+    var float trackedOpen = na
+    var float trackedHigh = na
+    var float trackedLow = na
+    var int trackedSessionId = na
+    bool inside = sessionId == 0 ? (hourNow >= 20 or hourNow < 2) : sessionId == 1 ? (hourNow >= 2 and hourNow < 8) : sessionId == 2 ? (hourNow >= 8 and hourNow < 12) : sessionId == 3 ? (hourNow >= 12 and hourNow < 16) : false
+    bool newSession = inside and (na(trackedSessionId) or trackedSessionId != sessionId)
+    if newSession
+        trackedOpen := open
+        trackedHigh := high
+        trackedLow := low
+        trackedSessionId := sessionId
+    else if inside
+        trackedHigh := math.max(nz(trackedHigh, high), high)
+        trackedLow := math.min(nz(trackedLow, low), low)
+    else
+        trackedOpen := na
+        trackedHigh := na
+        trackedLow := na
+        trackedSessionId := na
+    [trackedOpen, trackedHigh, trackedLow]
+
+f_track_hour_chart(int targetHour, int hourNow) =>
+    var float trackedOpen = na
+    var float trackedHigh = na
+    var float trackedLow = na
+    var int trackedHourTime = na
+    bool inside = targetHour == hourNow
+    int currentHourTime = time("60")
+    bool newHour = inside and (na(trackedHourTime) or trackedHourTime != currentHourTime)
+    if newHour
+        trackedOpen := open
+        trackedHigh := high
+        trackedLow := low
+        trackedHourTime := currentHourTime
+    else if inside
+        trackedHigh := math.max(nz(trackedHigh, high), high)
+        trackedLow := math.min(nz(trackedLow, low), low)
+    else
+        trackedOpen := na
+        trackedHigh := na
+        trackedLow := na
+        trackedHourTime := na
+    [trackedOpen, trackedHigh, trackedLow]
+
+// Use the chart hour for automatic selection so a source-hour transition cannot blank a session.
+int autoSession = currentHour >= 20 or currentHour < 2 ? 0 : currentHour < 8 ? 1 : currentHour < 12 ? 2 : currentHour < 16 ? 3 : -1
+int selectedSession = sessionMode == "Asia" ? 0 : sessionMode == "London" ? 1 : sessionMode == "NY AM" ? 2 : sessionMode == "NY PM" ? 3 : autoSession
+string sessionName = selectedSession == 0 ? "Asia" : selectedSession == 1 ? "London" : selectedSession == 2 ? "NY AM" : selectedSession == 3 ? "NY PM" : "Session inactive"
+string sessionCode = selectedSession == 0 ? "A" : selectedSession == 1 ? "LND" : selectedSession == 2 ? "NY AM" : selectedSession == 3 ? "NY PM" : "S"
+float sLongSD = selectedSession == 0 ? asiaLongSD : selectedSession == 1 ? londonLongSD : selectedSession == 2 ? nyamLongSD : selectedSession == 3 ? nypmLongSD : na
+float sShortSD = selectedSession == 0 ? asiaShortSD : selectedSession == 1 ? londonShortSD : selectedSession == 2 ? nyamShortSD : selectedSession == 3 ? nypmShortSD : na
+int sLongN = selectedSession == 0 ? asiaLongN : selectedSession == 1 ? londonLongN : selectedSession == 2 ? nyamLongN : selectedSession == 3 ? nypmLongN : 0
+int sShortN = selectedSession == 0 ? asiaShortN : selectedSession == 1 ? londonShortN : selectedSession == 2 ? nyamShortN : selectedSession == 3 ? nypmShortN : 0
+[sOpen, sHigh, sLow] = f_track_session_chart(selectedSession, currentHour)
+
+// === Active Hour selection ===
+int inputHour = hourMode == "Auto (Current Hour)" ? currentHour : int(str.tonumber(str.substring(hourMode, 0, 2)))
+float hLongSD = inputHour == 0 ? h00LSD : inputHour == 1 ? h01LSD : inputHour == 2 ? h02LSD : inputHour == 3 ? h03LSD : inputHour == 4 ? h04LSD : inputHour == 5 ? h05LSD : inputHour == 6 ? h06LSD : inputHour == 7 ? h07LSD : inputHour == 8 ? h08LSD : inputHour == 9 ? h09LSD : inputHour == 10 ? h10LSD : inputHour == 11 ? h11LSD : inputHour == 12 ? h12LSD : inputHour == 13 ? h13LSD : inputHour == 14 ? h14LSD : inputHour == 15 ? h15LSD : inputHour == 16 ? h16LSD : inputHour == 17 ? h17LSD : inputHour == 18 ? h18LSD : inputHour == 19 ? h19LSD : inputHour == 20 ? h20LSD : inputHour == 21 ? h21LSD : inputHour == 22 ? h22LSD : h23LSD
+float hShortSD = inputHour == 0 ? h00SSD : inputHour == 1 ? h01SSD : inputHour == 2 ? h02SSD : inputHour == 3 ? h03SSD : inputHour == 4 ? h04SSD : inputHour == 5 ? h05SSD : inputHour == 6 ? h06SSD : inputHour == 7 ? h07SSD : inputHour == 8 ? h08SSD : inputHour == 9 ? h09SSD : inputHour == 10 ? h10SSD : inputHour == 11 ? h11SSD : inputHour == 12 ? h12SSD : inputHour == 13 ? h13SSD : inputHour == 14 ? h14SSD : inputHour == 15 ? h15SSD : inputHour == 16 ? h16SSD : inputHour == 17 ? h17SSD : inputHour == 18 ? h18SSD : inputHour == 19 ? h19SSD : inputHour == 20 ? h20SSD : inputHour == 21 ? h21SSD : inputHour == 22 ? h22SSD : h23SSD
+int hLongN = inputHour == 0 ? h00LN : inputHour == 1 ? h01LN : inputHour == 2 ? h02LN : inputHour == 3 ? h03LN : inputHour == 4 ? h04LN : inputHour == 5 ? h05LN : inputHour == 6 ? h06LN : inputHour == 7 ? h07LN : inputHour == 8 ? h08LN : inputHour == 9 ? h09LN : inputHour == 10 ? h10LN : inputHour == 11 ? h11LN : inputHour == 12 ? h12LN : inputHour == 13 ? h13LN : inputHour == 14 ? h14LN : inputHour == 15 ? h15LN : inputHour == 16 ? h16LN : inputHour == 17 ? h17LN : inputHour == 18 ? h18LN : inputHour == 19 ? h19LN : inputHour == 20 ? h20LN : inputHour == 21 ? h21LN : inputHour == 22 ? h22LN : h23LN
+int hShortN = inputHour == 0 ? h00SN : inputHour == 1 ? h01SN : inputHour == 2 ? h02SN : inputHour == 3 ? h03SN : inputHour == 4 ? h04SN : inputHour == 5 ? h05SN : inputHour == 6 ? h06SN : inputHour == 7 ? h07SN : inputHour == 8 ? h08SN : inputHour == 9 ? h09SN : inputHour == 10 ? h10SN : inputHour == 11 ? h11SN : inputHour == 12 ? h12SN : inputHour == 13 ? h13SN : inputHour == 14 ? h14SN : inputHour == 15 ? h15SN : inputHour == 16 ? h16SN : inputHour == 17 ? h17SN : inputHour == 18 ? h18SN : inputHour == 19 ? h19SN : inputHour == 20 ? h20SN : inputHour == 21 ? h21SN : inputHour == 22 ? h22SN : h23SN
+[hOpen, hHigh, hLow] = f_track_hour_chart(inputHour, currentHour)
+
+// Live paths are deliberately chart-timeframe based: every selected chart bar
+// contributes its own high/low excursion while the distribution stays D/60 sourced.
+f_track_chart_range(float anchor) =>
+    var float trackedHigh = na
+    var float trackedLow = na
+    bool newWindow = not na(anchor) and (na(anchor[1]) or anchor != anchor[1])
+    if newWindow
+        trackedHigh := high
+        trackedLow := low
+    else if not na(anchor)
+        trackedHigh := math.max(nz(trackedHigh, high), high)
+        trackedLow := math.min(nz(trackedLow, low), low)
+    else
+        trackedHigh := na
+        trackedLow := na
+    [trackedHigh, trackedLow]
+
+[monthlyTrackHigh, monthlyTrackLow] = f_track_chart_range(monthlyOpen)
+[weeklyTrackHigh, weeklyTrackLow] = f_track_chart_range(weeklyOpen)
+[dailyTrackHigh, dailyTrackLow] = f_track_chart_range(dailyOpen)
+[yearlyTrackHigh, yearlyTrackLow] = f_track_chart_range(yearlyOpen)
+[sessionTrackHigh, sessionTrackLow] = f_track_chart_range(sOpen)
+[hourTrackHigh, hourTrackLow] = f_track_chart_range(hOpen)
+
+// === Rendering ===
+var array<line> drawnLines = array.new<line>()
+var array<label> drawnLabels = array.new<label>()
+var array<box> drawnBoxes = array.new<box>()
+
+f_clear_drawings() =>
+    while array.size(drawnLines) > 0
+        line.delete(array.pop(drawnLines))
+    while array.size(drawnLabels) > 0
+        label.delete(array.pop(drawnLabels))
+    while array.size(drawnBoxes) > 0
+        box.delete(array.pop(drawnBoxes))
+
+f_normal_percentile(float value, float sd) =>
+    float z = sd != 0 ? value / sd : 0.0
+    float k = 1.0 / (1.0 + 0.2316419 * math.abs(z))
+    float poly = k * (0.319381530 + k * (-0.356563782 + k * (1.781477937 + k * (-1.821255978 + k * 1.330274429))))
+    float cdf = 1.0 - 0.3989422804 * math.exp(-0.5 * z * z) * poly
+    100.0 * (z < 0 ? 1.0 - cdf : cdf)
+
+f_draw_column(int leftX, float anchor, float liveHigh, float liveLow, string title, string zeroName, float sd, int n, color accent, bool longSample, bool dataOnLeft, int minSamp, int shortLen) =>
+    bool ready = longSample ? n >= minSamp : n >= shortLen
+    int rightX = leftX + columnWidth
+    int middleX = int(math.round((leftX + rightX) / 2.0))
+    int dataX = dataOnLeft ? leftX : rightX
+    string dataStyle = dataOnLeft ? label.style_label_right : label.style_label_left
+    string labelSize = f_text_size(dataTextSizeInput)
+    if not na(anchor) and ready
+        float outerTop = anchor * (1 + 2.0 * sd)
+        float outerBottom = anchor * (1 - 2.0 * sd)
+        float highReturn = (liveHigh - anchor) / anchor
+        float lowReturn = (liveLow - anchor) / anchor
+        float cappedHighReturn = math.max(0.0, math.min(2.0 * sd, highReturn))
+        float cappedLowReturn = math.min(0.0, math.max(-2.0 * sd, lowReturn))
+        float highPrice = anchor * (1 + cappedHighReturn)
+        float lowPrice = anchor * (1 + cappedLowReturn)
+        // The two sides preserve the active window's realized high/low range after reversals.
+        array.push(drawnBoxes, box.new(leftX, outerTop, rightX, outerBottom, bgcolor = color.new(color.white, 100), border_color = brdrclr, border_width = 1, border_style = f_border_style(borderStyleInput)))
+        if cappedHighReturn > 0
+            array.push(drawnBoxes, box.new(leftX, highPrice, rightX, anchor, bgcolor = color.new(upColor, 18), border_color = color.new(upColor, 100)))
+            if showLabels
+                // label_down places its text above its anchor: outside the green live body.
+                array.push(drawnLabels, label.new(middleX, highPrice, "p" + str.tostring(math.round(f_normal_percentile(highReturn, sd))), style = label.style_label_down, color = color.new(color.black, 100), textcolor = longColor2, size = labelSize))
+        if cappedLowReturn < 0
+            array.push(drawnBoxes, box.new(leftX, anchor, rightX, lowPrice, bgcolor = color.new(downColor, 18), border_color = color.new(downColor, 100)))
+            if showLabels
+                // label_up places its text below its anchor: outside the red live body.
+                array.push(drawnLabels, label.new(middleX, lowPrice, "p" + str.tostring(math.round(f_normal_percentile(math.abs(lowReturn), sd))), style = label.style_label_up, color = color.new(color.black, 100), textcolor = shortColor2, size = labelSize))
+        if showSD
+            for i = 0 to array.size(sdMultipliers) - 1
+                float mult = array.get(sdMultipliers, i)
+                float upper = anchor * (1 + mult * sd)
+                float lower = anchor * (1 - mult * sd)
+                if showLabels
+                    array.push(drawnLabels, label.new(dataX, upper, "+" + str.tostring(mult), style = dataStyle, color = color.new(color.black, 100), textcolor = accent, size = labelSize))
+                    array.push(drawnLabels, label.new(dataX, lower, "-" + str.tostring(mult), style = dataStyle, color = color.new(color.black, 100), textcolor = accent, size = labelSize))
+        if showLabels
+            if showSampleCount
+                array.push(drawnLabels, label.new(middleX, outerTop, title + "\n n=" + str.tostring(n), style = label.style_label_center, color = color.new(color.black, 100), textcolor = accent, size = labelSize))
+            array.push(drawnLabels, label.new(dataX, anchor, zeroName, style = dataStyle, color = color.new(color.black, 100), textcolor = nameTextColor, size = labelSize))
+    else if showLabels
+        // Keep unavailable-session warnings centered over the column.
+        array.push(drawnLabels, label.new(middleX, close, title + "\nwarming", style = label.style_label_center, color = color.new(color.black, 100), textcolor = color.gray, size = labelSize))
+
+// Connects the +-2 SD boundaries of each long/short pair for instant regime comparison.
+f_draw_regime_range(int longX, float longAnchor, float longSD, int longN, int shortX, float shortAnchor, float shortSD, int shortN, int minSamp, int shortLen) =>
+    bool ready = not na(longAnchor) and not na(shortAnchor) and not na(longSD) and not na(shortSD) and longN >= minSamp and shortN >= shortLen
+    if ready
+        array.push(drawnLines, line.new(longX, longAnchor * (1 + 2.0 * longSD), shortX, shortAnchor * (1 + 2.0 * shortSD), color = regimeLineColor, style = f_border_style(borderStyleInput), width = 1))
+        array.push(drawnLines, line.new(longX, longAnchor * (1 - 2.0 * longSD), shortX, shortAnchor * (1 - 2.0 * shortSD), color = regimeLineColor, style = f_border_style(borderStyleInput), width = 1))
+
+if barstate.islast
+    f_clear_drawings()
+    int step = columnWidth + columnGap
+    int fiveYearStart = bar_index + fiveYearOffset
+    int twentyDayStart = bar_index + twentyDayOffset
+    string hourCode = str.tostring(inputHour)
+    
+    // Calculate dynamic offsets based on which columns are enabled
+    int mColActive = show5YMonthly or show20DMonthly ? 1 : 0
+    int wColActive = show5YWeekly or show20DWeekly ? 1 : 0
+    int dColActive = show5YDaily or show20DDaily ? 1 : 0
+    int sColActive = show5YSession or show20DSession ? 1 : 0
+    
+    int mOffset = 0
+    int wOffset = mOffset + mColActive
+    int dOffset = wOffset + wColActive
+    int sOffset = dOffset + dColActive
+    int hOffset = sOffset + sColActive
+    int yOffset = hOffset + (show5YHour or show20DHour ? 1 : 0)
+    
+    if show5YMonthly
+        f_draw_column(fiveYearStart + step * mOffset, monthlyOpen, monthlyTrackHigh, monthlyTrackLow, "5Y M", "M", mLongSD, mLongN, longColor, true, true, minSamples, shortLength)
+    if show5YWeekly
+        f_draw_column(fiveYearStart + step * wOffset, weeklyOpen, weeklyTrackHigh, weeklyTrackLow, "5Y W", "W", wLongSD, wLongN, longColor, true, true, minSamples, shortLength)
+    if show5YDaily
+        f_draw_column(fiveYearStart + step * dOffset, dailyOpen, dailyTrackHigh, dailyTrackLow, "5Y D", "D", dLongSD, dLongN, longColor, true, true, minSamples, shortLength)
+    if show5YSession
+        f_draw_column(fiveYearStart + step * sOffset, sOpen, sessionTrackHigh, sessionTrackLow, "5Y " + sessionName, sessionCode, sLongSD, sLongN, longColor, true, true, minSamples, shortLength)
+    if show5YHour
+        f_draw_column(fiveYearStart + step * hOffset, hOpen, hourTrackHigh, hourTrackLow, "5Y H" + str.tostring(inputHour, "00"), hourCode, hLongSD, hLongN, longColor, true, true, minSamples, shortLength)
+    if show5YYearly
+        f_draw_column(fiveYearStart + step * yOffset, yearlyOpen, yearlyTrackHigh, yearlyTrackLow, "5Y Y", "Y", yLongSD, yLongN, longColor, true, true, yearMinSamples, yearShortLength)
+        
+    if show20DHour
+        f_draw_column(twentyDayStart + step * (hOffset - dOffset), hOpen, hourTrackHigh, hourTrackLow, str.tostring(shortLength) + "D H" + str.tostring(inputHour, "00"), hourCode, hShortSD, hShortN, shortColor, false, false, minSamples, shortLength)
+    if show20DSession
+        f_draw_column(twentyDayStart + step * (sOffset - dOffset), sOpen, sessionTrackHigh, sessionTrackLow, str.tostring(shortLength) + "D " + sessionName, sessionCode, sShortSD, sShortN, shortColor, false, false, minSamples, shortLength)
+    if show20DDaily
+        f_draw_column(twentyDayStart, dailyOpen, dailyTrackHigh, dailyTrackLow, str.tostring(shortLength) + "D D", "D", dShortSD, dShortN, shortColor, false, false, minSamples, shortLength)
+    if show20DWeekly
+        f_draw_column(twentyDayStart - step * (dOffset - wOffset), weeklyOpen, weeklyTrackHigh, weeklyTrackLow, str.tostring(shortLength) + "D W", "W", wShortSD, wShortN, shortColor, false, false, minSamples, shortLength)
+    if show20DMonthly
+        f_draw_column(twentyDayStart - step * (dOffset - mOffset), monthlyOpen, monthlyTrackHigh, monthlyTrackLow, str.tostring(shortLength) + "D M", "M", mShortSD, mShortN, shortColor, false, false, minSamples, shortLength)
+    if show20DYearly
+        f_draw_column(twentyDayStart + step * (yOffset - dOffset), yearlyOpen, yearlyTrackHigh, yearlyTrackLow, str.tostring(yearShortLength) + "Y Y", "Y", yShortSD, yShortN, shortColor, false, false, yearMinSamples, yearShortLength)
+        
+    // Lines compare the exact +-2 SD range of the matching 5Y and 20D distributions.
+    if showMonthlyRegimeLines
+        f_draw_regime_range(fiveYearStart + step * mOffset, monthlyOpen, mLongSD, mLongN, twentyDayStart - step * (dOffset - mOffset) + columnWidth, monthlyOpen, mShortSD, mShortN, minSamples, shortLength)
+    if showWeeklyRegimeLines
+        f_draw_regime_range(fiveYearStart + step * wOffset, weeklyOpen, wLongSD, wLongN, twentyDayStart - step * (dOffset - wOffset) + columnWidth, weeklyOpen, wShortSD, wShortN, minSamples, shortLength)
+    if showDailyRegimeLines
+        f_draw_regime_range(fiveYearStart + step * dOffset, dailyOpen, dLongSD, dLongN, twentyDayStart + columnWidth, dailyOpen, dShortSD, dShortN, minSamples, shortLength)
+    if showSessionRegimeLines
+        f_draw_regime_range(fiveYearStart + step * sOffset, sOpen, sLongSD, sLongN, twentyDayStart + step * (sOffset - dOffset) + columnWidth, sOpen, sShortSD, sShortN, minSamples, shortLength)
+    if showHourRegimeLines
+        f_draw_regime_range(fiveYearStart + step * hOffset, hOpen, hLongSD, hLongN, twentyDayStart + step * (hOffset - dOffset) + columnWidth, hOpen, hShortSD, hShortN, minSamples, shortLength)
+    if showYearlyRegimeLines
+        f_draw_regime_range(fiveYearStart + step * yOffset, yearlyOpen, yLongSD, yLongN, twentyDayStart + step * (yOffset - dOffset) + columnWidth, yearlyOpen, yShortSD, yShortN, yearMinSamples, yearShortLength)
+    if showRegime
+        [monthlyRatio, monthlyRegime] = f_regime(mShortSD, mShortN, mLongSD, mLongN, minSamples, shortLength)
+        [weeklyRatio, weeklyRegime] = f_regime(wShortSD, wShortN, wLongSD, wLongN, minSamples, shortLength)
+        [dailyRatio, dailyRegime] = f_regime(dShortSD, dShortN, dLongSD, dLongN, minSamples, shortLength)
+        [sessionRatio, sessionRegime] = f_regime(sShortSD, sShortN, sLongSD, sLongN, minSamples, shortLength)
+        [hourRatio, hourRegime] = f_regime(hShortSD, hShortN, hLongSD, hLongN, minSamples, shortLength)
+        [yearlyRatio, yearlyRegime] = f_regime(yShortSD, yShortN, yLongSD, yLongN, yearMinSamples, yearShortLength)
+        
+        string regimeText = "Regime"
+        regimeText += show5YMonthly or show20DMonthly ? "  M: " + monthlyRegime + " |" : ""
+        regimeText += show5YWeekly or show20DWeekly ? "  W: " + weeklyRegime + " |" : ""
+        regimeText += show5YDaily or show20DDaily ? "  D: " + dailyRegime + " |" : ""
+        regimeText += show5YSession or show20DSession ? "  S: " + sessionRegime + " |" : ""
+        regimeText += show5YHour or show20DHour ? "  H: " + hourRegime + " |" : ""
+        regimeText += show5YYearly or show20DYearly ? "  Y: " + yearlyRegime : ""
+        
+        // Remove trailing " |" if it exists
+        if str.endswith(regimeText, " |")
+            regimeText := str.substring(regimeText, 0, str.length(regimeText) - 2)
+            
+        array.push(drawnLabels, label.new(twentyDayStart, close, regimeText, style = label.style_label_left, color = color.new(color.black, 10), textcolor = longColor, size = size.small))
+
+//Script By: x.com/Desiringmachine; Concept: NqStats.com (x.com/probablechris)
+
