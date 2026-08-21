@@ -1,6 +1,6 @@
 # Hourly-Distro
 Price Distribution
-![screenshot]([https://github.com/Desiringmachine/Hourly-Distro/blob/main/hourly%20distro%20scren.png])
+![screenshot](https://raw.githubusercontent.com/Desiringmachine/Hourly-Distro/refs/heads/main/hourly%20distro%20scren.png)
 
 # Hourly Distro [Desiringmachine]
 
